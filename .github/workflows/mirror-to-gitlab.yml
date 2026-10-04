@@ -1,25 +1,21 @@
-name: Mirror GitHub to GitLab
+name: Mirror to GitLab
 
 on:
   push:
-  delete:
+    branches: [ "**" ]
 
 jobs:
-  mirror:
+  to-gitlab:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout complete repository
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          fetch-tags: true
 
-      - name: Mirror all branches and tags to GitLab
-        env:
-          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
-        run: |
-          git remote add gitlab https://oauth2:${GITLAB_TOKEN}@gitlab.com/ecomms1/ecomms-productservice.git
-
-          git push gitlab --all --force
-          git push gitlab --tags --force
+      - name: Mirror to GitLab
+        uses: pixta-dev/repository-mirroring-action@v1
+        with:
+          target_repo_url: 'git@gitlab.com:ecomms1/ecomms-productservice.git'
+          ssh_private_key: ${{ secrets.GITLAB_TOKEN }}
