@@ -30,4 +30,12 @@ class AttributeValue extends Model
             'attribute_value_id'
         );
     }
+
+    public function images()
+    {
+        return $this->hasMany(
+            ProductImage::class,
+            'attribute_value_id'
+        );
+    }
 }
