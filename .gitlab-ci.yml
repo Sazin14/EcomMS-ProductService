@@ -1,12 +1,7 @@
 workflow:
   rules:
-    # Merge Request pipelines
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-
-    # Pushes to devops or main
     - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "devops" || $CI_COMMIT_BRANCH == "main")'
-
-    # Do not create pipelines for anything else
     - when: never
 
 stages:
@@ -15,56 +10,56 @@ stages:
 variables:
   IMAGE_SHA: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
 
-build_test:
+build_test_mr:
   stage: build
-
   tags:
     - dell-local
 
-  script:
-    - echo "=========================================="
-    - echo "Product Service CI"
-    - echo "Pipeline source: $CI_PIPELINE_SOURCE"
-    - echo "Branch: ${CI_COMMIT_BRANCH:-MR}"
-    - echo "Commit: $CI_COMMIT_SHA"
-    - echo "=========================================="
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
+  script:
+    - echo "=== Product Service Merge Request CI ==="
+    - echo "Source: $CI_PIPELINE_SOURCE"
+    - echo "Commit: $CI_COMMIT_SHA"
     - echo "=== Building Product Service image ==="
     - docker build -t "$IMAGE_SHA" .
-
     - echo "=== Testing Product Service container ==="
     - docker run --rm "$IMAGE_SHA" php artisan --version
     - docker run --rm "$IMAGE_SHA" php artisan route:list
+    - echo "=== MR build and tests passed ==="
+    - echo "Image was NOT pushed."
 
-    - |
-      if [ "$CI_PIPELINE_SOURCE" = "push" ]; then
+build_test_push:
+  stage: build
+  tags:
+    - dell-local
 
-        echo "=== Logging into GitLab Container Registry ==="
-        echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "devops" || $CI_COMMIT_BRANCH == "main")'
 
-        if [ "$CI_COMMIT_BRANCH" = "devops" ]; then
-          IMAGE_BRANCH="$CI_REGISTRY_IMAGE:devops"
-        elif [ "$CI_COMMIT_BRANCH" = "main" ]; then
-          IMAGE_BRANCH="$CI_REGISTRY_IMAGE:main"
-        else
-          echo "Unsupported branch: $CI_COMMIT_BRANCH"
-          exit 1
-        fi
+  before_script:
+    - docker info
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
 
-        echo "=== Tagging branch image: $IMAGE_BRANCH ==="
-        docker tag "$IMAGE_SHA" "$IMAGE_BRANCH"
+  script:
+    - echo "=== Product Service Branch CI ==="
+    - echo "Branch: $CI_COMMIT_BRANCH"
+    - echo "Commit: $CI_COMMIT_SHA"
+    - echo "=== Building Product Service image ==="
+    - docker build -t "$IMAGE_SHA" .
+    - echo "=== Testing Product Service container ==="
+    - docker run --rm "$IMAGE_SHA" php artisan --version
+    - docker run --rm "$IMAGE_SHA" php artisan route:list
+    - echo "=== Selecting branch image tag ==="
+    - 'if [ "$CI_COMMIT_BRANCH" = "devops" ]; then IMAGE_BRANCH="$CI_REGISTRY_IMAGE:devops"; else IMAGE_BRANCH="$CI_REGISTRY_IMAGE:main"; fi'
+    - echo "Branch image: $IMAGE_BRANCH"
+    - echo "=== Tagging branch image ==="
+    - docker tag "$IMAGE_SHA" "$IMAGE_BRANCH"
+    - echo "=== Pushing SHA image ==="
+    - docker push "$IMAGE_SHA"
+    - echo "=== Pushing branch image ==="
+    - docker push "$IMAGE_BRANCH"
 
-        echo "=== Pushing SHA image ==="
-        docker push "$IMAGE_SHA"
-
-        echo "=== Pushing branch image ==="
-        docker push "$IMAGE_BRANCH"
-
-        echo "=== Logging out of GitLab Container Registry ==="
-        docker logout "$CI_REGISTRY" || true
-
-      else
-        echo "=== Merge Request pipeline ==="
-        echo "Build and tests completed."
-        echo "Docker image was NOT pushed."
-      fi
+  after_script:
+    - docker logout "$CI_REGISTRY" || true
