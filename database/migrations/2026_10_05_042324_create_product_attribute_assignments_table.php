@@ -8,33 +8,16 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('product_attributes', function (Blueprint $table) {
-            $table->id();
+        Schema::create('product_attribute_assignments', function (Blueprint $t) {
+            $t->foreignId('product_id')->constrained()->cascadeOnDelete();
+            $t->foreignId('attribute_value_id')->constrained()->cascadeOnDelete();
 
-            $table->foreignId('product_id')
-                ->constrained()
-                ->cascadeOnDelete();
-
-            $table->foreignId('attribute_id')
-                ->constrained('attributes')
-                ->cascadeOnDelete();
-
-            $table->unsignedInteger('sort_order')->default(0);
-
-            $table->timestamps();
-
-            $table->unique([
-                'product_id',
-                'attribute_id',
-            ]);
-
-            $table->index('product_id');
-            $table->index('attribute_id');
+            $t->primary(['product_id', 'attribute_value_id']);
         });
     }
 
     public function down(): void
     {
-        Schema::dropIfExists('product_attributes');
+        Schema::dropIfExists('product_attribute_assignments');
     }
 };

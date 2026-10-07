@@ -8,39 +8,18 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('products', function (Blueprint $table) {
-            $table->id();
+        Schema::create('products', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('category_id')->constrained()->restrictOnDelete();
+            $t->foreignId('brand_id')->nullable()->constrained()->nullOnDelete();
+            $t->string('name');
+            $t->string('slug')->unique();
+            $t->text('description')->nullable();
+            $t->string('status', 20)->default('draft');   // draft | active | inactive
+            $t->timestamps();
+            $t->softDeletes();
 
-            $table->foreignId('category_id')
-                ->constrained()
-                ->restrictOnDelete();
-
-            $table->foreignId('brand_id')
-                ->nullable()
-                ->constrained()
-                ->nullOnDelete();
-
-            $table->string('name');
-            $table->string('slug')->unique();
-            $table->text('description')->nullable();
-
-            $table->enum('status', [
-                'draft',
-                'active',
-                'inactive',
-            ])->default('draft');
-
-            $table->timestamps();
-
-            $table->index([
-                'category_id',
-                'status',
-            ]);
-
-            $table->index([
-                'brand_id',
-                'status',
-            ]);
+            $t->index(['category_id', 'brand_id', 'status']);
         });
     }
 

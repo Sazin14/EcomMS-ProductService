@@ -9,29 +9,27 @@ class ProductImage extends Model
 {
     protected $fillable = [
         'product_id',
-        'variant_id',
+        'attribute_value_id',
         'url',
         'sort_order',
         'is_primary',
     ];
 
-    protected function casts(): array
-    {
-        return [
-            'is_primary' => 'boolean',
-        ];
-    }
+    protected $casts = [
+        'is_primary' => 'boolean',
+        'sort_order' => 'integer',
+    ];
 
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
     }
 
-    public function variant(): BelongsTo
+    public function attributeValue(): BelongsTo
     {
         return $this->belongsTo(
-            ProductVariant::class,
-            'variant_id'
+            AttributeValue::class,
+            'attribute_value_id'
         );
     }
 }

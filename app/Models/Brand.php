@@ -7,20 +7,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Brand extends Model
 {
-    protected $fillable = [
-        'name',
-        'slug',
-        'description',
-        'logo',
-        'is_active',
-    ];
+    protected $fillable = ['name', 'slug', 'is_active'];
 
-    protected function casts(): array
-    {
-        return [
-            'is_active' => 'boolean',
-        ];
-    }
+    protected $casts = ['is_active' => 'boolean'];
 
     public function products(): HasMany
     {
