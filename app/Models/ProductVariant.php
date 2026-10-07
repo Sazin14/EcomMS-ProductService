@@ -4,44 +4,29 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class ProductVariant extends Model
 {
     protected $fillable = [
-        'product_id',
-        'sku',
-        'purchase_price',
-        'selling_price',
-        'status',
+        'product_id', 'sku', 'combination_hash',
+        'purchase_price', 'selling_price', 'stock', 'status',
     ];
 
-    protected function casts(): array
-    {
-        return [
-            'purchase_price' => 'decimal:2',
-            'selling_price' => 'decimal:2',
-        ];
-    }
+    protected $casts = [
+        'purchase_price' => 'decimal:2',
+        'selling_price' => 'decimal:2',
+        'stock' => 'integer',
+    ];
 
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
     }
 
-    public function attributeValues(): HasMany
+    /** The values that define this variant (8GB, 128GB, Space Grey). */
+    public function attributeValues(): BelongsToMany
     {
-        return $this->hasMany(
-            VariantAttributeValue::class,
-            'variant_id'
-        );
-    }
-
-    public function images(): HasMany
-    {
-        return $this->hasMany(
-            ProductImage::class,
-            'variant_id'
-        );
+        return $this->belongsToMany(AttributeValue::class, 'variant_attribute_values', 'variant_id', 'attribute_value_id');
     }
 }

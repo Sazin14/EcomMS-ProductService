@@ -8,34 +8,14 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('variant_attribute_values', function (Blueprint $table) {
-            $table->id();
+        Schema::create('variant_attribute_values', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('variant_id')->constrained('product_variants')->cascadeOnDelete();
+            $t->foreignId('attribute_id')->constrained()->restrictOnDelete();
+            $t->foreignId('attribute_value_id')->constrained()->restrictOnDelete();
 
-            $table->foreignId('variant_id')
-                ->constrained('product_variants')
-                ->cascadeOnDelete();
-
-            $table->foreignId('attribute_id')
-                ->constrained('attributes')
-                ->cascadeOnDelete();
-
-            $table->foreignId('attribute_value_id')
-                ->constrained('attribute_values')
-                ->cascadeOnDelete();
-
-            $table->timestamps();
-
-            $table->unique([
-                'variant_id',
-                'attribute_id',
-            ]);
-
-            $table->index([
-                'attribute_id',
-                'attribute_value_id',
-            ]);
-
-            $table->index('variant_id');
+            $t->unique(['variant_id', 'attribute_id']);   // one value per attribute per variant
+            $t->index(['attribute_value_id', 'variant_id']);   // used by storefront filters
         });
     }
 

@@ -42,7 +42,7 @@ class VerifyJwt
         try {
 
             $publicKey = file_get_contents(
-                storage_path('keys/jwt-public.pem')
+                base_path(config('jwt.public_key_path'))
             );
 
             if ($publicKey === false) {

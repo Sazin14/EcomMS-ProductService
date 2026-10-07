@@ -8,16 +8,12 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('brands', function (Blueprint $table) {
-            $table->id();
-
-            $table->string('name');
-            $table->string('slug')->unique();
-            $table->text('description')->nullable();
-            $table->string('logo')->nullable();
-            $table->boolean('is_active')->default(true);
-
-            $table->timestamps();
+        Schema::create('brands', function (Blueprint $t) {
+            $t->id();
+            $t->string('name');
+            $t->string('slug')->unique();   // 'Apple' and 'apple' share one slug, so no duplicate brands
+            $t->boolean('is_active')->default(true);
+            $t->timestamps();
         });
     }
 

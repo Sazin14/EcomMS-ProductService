@@ -8,31 +8,15 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('attribute_values', function (Blueprint $table) {
-            $table->id();
+        Schema::create('attribute_values', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('attribute_id')->constrained()->cascadeOnDelete();
+            $t->string('value');
+            $t->string('slug');
+            $t->unsignedSmallInteger('sort_order')->default(0);
+            $t->timestamps();
 
-            $table->foreignId('attribute_id')
-                ->constrained('attributes')
-                ->cascadeOnDelete();
-
-            $table->string('value');
-            $table->string('slug');
-
-            $table->unsignedInteger('sort_order')->default(0);
-
-            $table->timestamps();
-
-            $table->unique([
-                'attribute_id',
-                'value',
-            ]);
-
-            $table->unique([
-                'attribute_id',
-                'slug',
-            ]);
-
-            $table->index('attribute_id');
+            $t->unique(['attribute_id', 'slug']);
         });
     }
 
