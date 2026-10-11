@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AttributeValue;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Support\CatalogEvents;
 use App\Services\Concerns\FailsValidation;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
@@ -124,6 +125,7 @@ class VariantService
                 'selling_price' => $row['selling_price'],
                 'stock' => (int) ($row['stock'] ?? 0),
                 'status' => $row['status'] ?? 'active',
+                'allow_preorder' => (bool) ($row['allow_preorder'] ?? false),
             ]);
 
             foreach ($item['picked'] as $value) {
@@ -142,6 +144,11 @@ class VariantService
         // Keep the product's "selected values" list in sync (images are validated against it).
         $product->attributeValues()->syncWithoutDetaching($allValueIds);
 
+        // Tell Inventory about the new variants. Saved in the outbox inside this same transaction.
+        foreach ($created as $variant) {
+            CatalogEvents::variantUpserted($variant, $product);
+        }
+
         return $created;
     }
 
@@ -152,7 +159,13 @@ class VariantService
             $this->fail('sku', 'This SKU already exists.');
         }
 
-        $variant->update(Arr::only($data, ['sku', 'purchase_price', 'selling_price', 'stock', 'status']));
+        DB::transaction(function () use ($variant, $data) {
+            $variant->update(Arr::only($data, ['sku', 'purchase_price', 'selling_price', 'stock', 'status', 'allow_preorder']));
+
+            if ($variant->wasChanged(['sku', 'allow_preorder'])) {
+                CatalogEvents::variantUpserted($variant);
+            }
+        });
 
         return $variant->fresh('attributeValues.attribute');
     }
@@ -163,7 +176,10 @@ class VariantService
             $this->fail('variant', 'A product must keep at least one variant.');
         }
 
-        $variant->delete();
+        DB::transaction(function () use ($variant) {
+            CatalogEvents::variantDeleted($variant->id, $variant->sku);
+            $variant->delete();
+        });
     }
 
     /** Same value set in any order gives the same hash. */

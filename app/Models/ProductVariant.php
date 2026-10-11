@@ -10,13 +10,14 @@ class ProductVariant extends Model
 {
     protected $fillable = [
         'product_id', 'sku', 'combination_hash',
-        'purchase_price', 'selling_price', 'stock', 'status',
+        'purchase_price', 'selling_price', 'stock', 'status', 'allow_preorder',
     ];
 
     protected $casts = [
         'purchase_price' => 'decimal:2',
         'selling_price' => 'decimal:2',
         'stock' => 'integer',
+        'allow_preorder' => 'boolean',
     ];
 
     public function product(): BelongsTo

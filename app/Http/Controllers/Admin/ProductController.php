@@ -88,6 +88,7 @@ class ProductController extends Controller
             'selling_price' => ['sometimes', 'numeric', 'min:0'],
             'stock' => ['sometimes', 'integer', 'min:0'],
             'status' => ['sometimes', 'in:active,inactive'],
+            'allow_preorder' => ['sometimes', 'boolean'],
         ]);
 
         return $this->variants->update($variant, $data);

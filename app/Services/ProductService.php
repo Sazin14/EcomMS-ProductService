@@ -6,6 +6,7 @@ use App\Models\AttributeValue;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Product;
+use App\Support\CatalogEvents;
 use App\Services\Concerns\FailsValidation;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -104,14 +105,24 @@ class ProductService
             $product->status = $data['status'];
         }
 
-        $product->save();
+        DB::transaction(function () use ($product) {
+            $product->save();
+
+            // The name is shown on the inventory dashboard: tell Inventory (saved with the change, sent later).
+            if ($product->wasChanged('name')) {
+                CatalogEvents::productUpserted($product);
+            }
+        });
 
         return $this->find($product->id);
     }
 
     public function delete(Product $product): void
     {
-        $product->delete();   // soft delete
+        DB::transaction(function () use ($product) {
+            CatalogEvents::productDeleted($product);   // Inventory stops suggesting purchases for these variants
+            $product->delete();   // soft delete
+        });
     }
 
     /**

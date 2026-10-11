@@ -33,6 +33,11 @@ return [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
             'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
         ],
+
+        'inventory' => [
+            'url' => env('INVENTORY_SERVICE_URL'),
+            'key' => env('INTERNAL_SERVICE_KEY'),
+        ], 
     ],
 
 ];
