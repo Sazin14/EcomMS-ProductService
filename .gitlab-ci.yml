@@ -1,70 +1,67 @@
 workflow:
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
     - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "devops" || $CI_COMMIT_BRANCH == "main")'
     - when: never
 
 stages:
-  - build
+  - test
+  - promote
 
 variables:
   IMAGE_SHA: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+  GITOPS_BRANCH: "devops"
+  GITOPS_MANIFEST: "apps/product/base/deployment.yaml"
 
-build_test_mr:
-  stage: build
+build_test:
+  stage: test
   tags:
     - dell-local
-
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-
-  script:
-    - echo "=== Product Service Merge Request CI ==="
-    - echo "Source $CI_PIPELINE_SOURCE"
-    - echo "Commit $CI_COMMIT_SHA"
-    - echo "=== Building Product Service image ==="
-    - docker build -t "$IMAGE_SHA" .
-    - echo "=== Testing Product Service container ==="
-    - docker run --rm "$IMAGE_SHA" php artisan --version
-    - docker run --rm "$IMAGE_SHA" php artisan route:list
-    - echo "=== MR build and tests passed ==="
-    - echo "Image was NOT pushed."
-
-build_test_push:
-  stage: build
-  tags:
-    - dell-local
-
-  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
     - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "devops" || $CI_COMMIT_BRANCH == "main")'
-
-  before_script:
-    - docker info
-    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
-
   script:
-    - echo "=== Product Service Branch CI ==="
-    - echo "Branch $CI_COMMIT_BRANCH"
-    - echo "Commit $CI_COMMIT_SHA"
-    - echo "=== Building Product Service image ==="
+    - docker info
+    - echo "Building Product Service image $IMAGE_SHA"
     - docker build -t "$IMAGE_SHA" .
-    - echo "=== Testing Product Service container ==="
+    - echo "Testing Laravel application startup"
     - docker run --rm "$IMAGE_SHA" php artisan --version
     - docker run --rm "$IMAGE_SHA" php artisan route:list
-    - echo "=== Selecting branch image tag ==="
     - |
-      if [ "$CI_COMMIT_BRANCH" = "devops" ]; then
-        IMAGE_BRANCH="$CI_REGISTRY_IMAGE:devops"
+      if [ "$CI_PIPELINE_SOURCE" = "push" ] && [ "$CI_COMMIT_BRANCH" = "main" ]; then
+        echo "$CI_JOB_TOKEN" | docker login "$CI_REGISTRY" -u gitlab-ci-token --password-stdin
+        docker push "$IMAGE_SHA"
+        docker logout "$CI_REGISTRY"
+        echo "Published production image: $IMAGE_SHA"
       else
-        IMAGE_BRANCH="$CI_REGISTRY_IMAGE:main"
+        echo "Test passed. No image was published."
       fi
-    - echo "Branch image $IMAGE_BRANCH"
-    - echo "=== Tagging branch image ==="
-    - docker tag "$IMAGE_SHA" "$IMAGE_BRANCH"
-    - echo "=== Pushing SHA image ==="
-    - docker push "$IMAGE_SHA"
-    - echo "=== Pushing branch image ==="
-    - docker push "$IMAGE_BRANCH"
-
   after_script:
-    - docker logout "$CI_REGISTRY" || true
+    - docker logout "$CI_REGISTRY" 2>/dev/null || true
+
+promote_gitops:
+  stage: promote
+  tags:
+    - dell-local
+  needs:
+    - build_test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
+  script:
+    - test -n "$GITOPS_GITHUB_TOKEN" || (echo "GITOPS_GITHUB_TOKEN is missing" && exit 1)
+    - git config --global user.name "GitLab CI"
+    - git config --global user.email "gitlab-ci@users.noreply.github.com"
+    - git clone --branch "$GITOPS_BRANCH" "https://x-access-token:${GITOPS_GITHUB_TOKEN}@github.com/Rasiulknots/ecomms-gitops.git" gitops
+    - cd gitops
+    - |
+      sed -i -E "s|(registry.gitlab.com/ecomms1/ecomms-productservice:)[^[:space:]]+|\1${CI_COMMIT_SHORT_SHA}|g" "$GITOPS_MANIFEST"
+    - echo "=== Product Service image references after update ==="
+    - grep -n 'registry.gitlab.com/ecomms1/ecomms-productservice:' "$GITOPS_MANIFEST"
+    - git add "$GITOPS_MANIFEST"
+    - |
+      if git diff --cached --quiet; then
+        echo "GitOps manifest already references this image."
+      else
+        git commit -m "Deploy Product Service ${CI_COMMIT_SHORT_SHA}"
+        git push origin "$GITOPS_BRANCH"
+      fi
