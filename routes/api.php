@@ -3,6 +3,10 @@
 use App\Http\Controllers\Admin\ProductController;
 use App\Http\Controllers\Admin\ProductSetupController;
 use App\Http\Controllers\Storefront\CatalogController;
+use App\Http\Controllers\Internal\VariantLookupController;     // with the other "use" lines at the top
+
+ // anywhere OUTSIDE the auth.jwt group
+
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -42,3 +46,6 @@ Route::middleware(['auth.jwt', 'authz'])->prefix('admin')->group(function () {
     Route::post('products/{product}/images', [ProductController::class, 'addImages'])->middleware('permission:product.update');
     Route::delete('images/{image}', [ProductController::class, 'destroyImage'])->middleware('permission:product.update');
 });
+
+Route::post('internal/variants/lookup', [VariantLookupController::class, 'lookup'])
+    ->middleware(\App\Http\Middleware\VerifyServiceKey::class);  
