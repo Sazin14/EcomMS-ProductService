@@ -1,0 +1,67 @@
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "devops" || $CI_COMMIT_BRANCH == "main")'
+    - when: never
+
+stages:
+  - test
+  - promote
+
+variables:
+  IMAGE_SHA: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+  GITOPS_BRANCH: "devops"
+  GITOPS_MANIFEST: "apps/product/base/deployment.yaml"
+
+build_test:
+  stage: test
+  tags:
+    - dell-local
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "devops" || $CI_COMMIT_BRANCH == "main")'
+  script:
+    - docker info
+    - echo "Building Product Service image $IMAGE_SHA"
+    - docker build -t "$IMAGE_SHA" .
+    - echo "Testing Laravel application startup"
+    - docker run --rm "$IMAGE_SHA" php artisan --version
+    - docker run --rm "$IMAGE_SHA" php artisan route:list
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "push" ] && [ "$CI_COMMIT_BRANCH" = "main" ]; then
+        echo "$CI_JOB_TOKEN" | docker login "$CI_REGISTRY" -u gitlab-ci-token --password-stdin
+        docker push "$IMAGE_SHA"
+        docker logout "$CI_REGISTRY"
+        echo "Published production image: $IMAGE_SHA"
+      else
+        echo "Test passed. No image was published."
+      fi
+  after_script:
+    - docker logout "$CI_REGISTRY" 2>/dev/null || true
+
+promote_gitops:
+  stage: promote
+  tags:
+    - dell-local
+  needs:
+    - build_test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
+  script:
+    - test -n "$GITOPS_GITHUB_TOKEN" || (echo "GITOPS_GITHUB_TOKEN is missing" && exit 1)
+    - git config --global user.name "GitLab CI"
+    - git config --global user.email "gitlab-ci@users.noreply.github.com"
+    - git clone --branch "$GITOPS_BRANCH" "https://x-access-token:${GITOPS_GITHUB_TOKEN}@github.com/Rasiulknots/ecomms-gitops.git" gitops
+    - cd gitops
+    - |
+      sed -i -E "s|(registry.gitlab.com/ecomms1/ecomms-productservice:)[^[:space:]]+|\1${CI_COMMIT_SHORT_SHA}|g" "$GITOPS_MANIFEST"
+    - echo "=== Product Service image references after update ==="
+    - grep -n 'registry.gitlab.com/ecomms1/ecomms-productservice:' "$GITOPS_MANIFEST"
+    - git add "$GITOPS_MANIFEST"
+    - |
+      if git diff --cached --quiet; then
+        echo "GitOps manifest already references this image."
+      else
+        git commit -m "Deploy Product Service ${CI_COMMIT_SHORT_SHA}"
+        git push origin "$GITOPS_BRANCH"
+      fi
