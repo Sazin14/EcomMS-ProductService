@@ -13,7 +13,9 @@ WORKDIR /app
 
 COPY composer.json composer.lock ./
 
+# ext-sockets is absent from the composer image but is installed in the production stage
 RUN composer install \
+    --ignore-platform-req=ext-sockets \
     --no-dev \
     --no-interaction \
     --no-progress \
@@ -44,10 +46,11 @@ FROM php:8.4-fpm-alpine AS production
 
 WORKDIR /var/www/html
 
-# Extensions: PostgreSQL + SQLite drivers, intl, zip, bcmath, opcache
+# Extensions: PostgreSQL + SQLite drivers, intl, zip, bcmath, opcache,
+# redis (phpredis, auth cache), sockets (php-amqplib / RabbitMQ), pcntl (queue/outbox workers)
 # (mbstring, tokenizer, xml, ctype, fileinfo, pdo are already in the base image)
 COPY --from=mlocati/php-extension-installer /usr/bin/install-php-extensions /usr/local/bin/
-RUN install-php-extensions bcmath intl opcache pdo_pgsql pdo_sqlite zip \
+RUN install-php-extensions bcmath intl opcache pcntl pdo_pgsql pdo_sqlite redis sockets zip \
     && mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
 COPY --from=vendor /app/vendor ./vendor
