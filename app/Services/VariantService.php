@@ -18,11 +18,7 @@ class VariantService
 
     public const MAX_COMBINATIONS = 500;
 
-    /**
-     * Builds the rows of the combination table (8GB/128GB/Grey ...). Saves nothing.
-     *
-     * @param  array  $definitions  [['attribute_id' => 1, 'value_ids' => [1, 2]], ...]
-     */
+    /** @param array $definitions */
     public function preview(array $definitions): array
     {
         $groups = [];
@@ -52,29 +48,20 @@ class VariantService
         ], $this->cartesian($groups));
     }
 
-    /**
-     * Saves variants for a product. Used when creating a product and when adding more later.
-     * Each row must pick exactly one value for every attribute the product uses.
-     * A product without attributes (simple product) gets exactly one row with an empty value list.
-     *
-     * @param  array  $rows  [['attribute_value_ids' => [1, 4, 10], 'sku' => '', 'purchase_price' => 500,
-     *                         'selling_price' => 650, 'stock' => 10], ...]
-     */
+    /** @param array $rows */
     public function add(Product $product, array $rows): Collection
     {
         if ($rows === []) {
             $this->fail('variants', 'At least one variant is required.');
         }
 
-        $productAttributeIds = $product->attributes()->pluck('attributes.id')
+        $productAttributeIds = $product->variantAttributes()->pluck('attributes.id')
             ->map(fn ($id) => (int) $id)->sort()->values()->all();
 
-        // One query for every value used in the request.
         $allValueIds = collect($rows)->pluck('attribute_value_ids')->flatten()
             ->map(fn ($id) => (int) $id)->unique()->values()->all();
         $values = AttributeValue::whereIn('id', $allValueIds)->get()->keyBy('id');
 
-        // SKUs typed by the admin must be unique (blank ones are generated below).
         $givenSkus = collect($rows)->pluck('sku')->map(fn ($s) => trim((string) $s))->filter()->values();
 
         if ($givenSkus->count() !== $givenSkus->unique()->count()) {
@@ -141,12 +128,10 @@ class VariantService
 
         DB::table('variant_attribute_values')->insert($pivotRows);
 
-        // Keep the product's "selected values" list in sync (images are validated against it).
         $product->attributeValues()->syncWithoutDetaching($allValueIds);
 
-        // Tell Inventory about the new variants. Saved in the outbox inside this same transaction.
         foreach ($created as $variant) {
-            CatalogEvents::variantUpserted($variant, $product);
+            CatalogEvents::variantUpserted($variant, $product, (int) $variant->stock);
         }
 
         return $created;
@@ -160,7 +145,7 @@ class VariantService
         }
 
         DB::transaction(function () use ($variant, $data) {
-            $variant->update(Arr::only($data, ['sku', 'purchase_price', 'selling_price', 'stock', 'status', 'allow_preorder']));
+            $variant->update(Arr::only($data, ['sku', 'purchase_price', 'selling_price', 'status', 'allow_preorder']));
 
             if ($variant->wasChanged(['sku', 'allow_preorder'])) {
                 CatalogEvents::variantUpserted($variant);
@@ -182,7 +167,6 @@ class VariantService
         });
     }
 
-    /** Same value set in any order gives the same hash. */
     private function hash(array $valueIds): string
     {
         sort($valueIds);

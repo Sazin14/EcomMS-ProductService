@@ -7,15 +7,12 @@ use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Product;
 use App\Support\CatalogEvents;
+use App\Support\SqlCompat;
 use App\Services\Concerns\FailsValidation;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
-/**
- * Admin side: create / edit / delete products.
- * Variants and images live in their own services; this class only orchestrates them.
- */
 class ProductService
 {
     use FailsValidation;
@@ -28,6 +25,7 @@ class ProductService
     public function __construct(
         private VariantService $variants,
         private ProductImageService $images,
+        private AttributeService $attributes,
     ) {}
 
     public function list(array $filters = []): LengthAwarePaginator
@@ -36,23 +34,25 @@ class ProductService
             ->with(['category:id,name', 'brand:id,name', 'thumbnail'])
             ->withCount('variants')
             ->withMin('variants as min_price', 'selling_price')
-            ->when($filters['category_id'] ?? null, fn ($q, $v) => $q->where('category_id', $v))
+            ->when($filters['category_id'] ?? null, fn ($q, $v) => $q->whereIn('category_id', Category::subtreeIds((int) $v)))
             ->when($filters['brand_id'] ?? null, fn ($q, $v) => $q->where('brand_id', $v))
             ->when($filters['status'] ?? null, fn ($q, $v) => $q->where('status', $v))
-            ->when($filters['search'] ?? null, fn ($q, $v) => $q->where('name', 'ilike', '%'.trim($v).'%'))
+            ->when($filters['search'] ?? null, fn ($q, $v) => $q->where('name', SqlCompat::like(), '%'.trim($v).'%'))
             ->latest()
             ->paginate(min((int) ($filters['per_page'] ?? 20), 100));
     }
 
     public function find(int $id): Product
     {
-        return Product::with(self::DETAILS)->findOrFail($id);
+        $product = Product::with(self::DETAILS)->findOrFail($id);
+
+        $product->setAttribute('specs', $product->specGroups());
+
+        $product->variants->each->makeHidden('stock');
+
+        return $product;
     }
 
-    /**
-     * Creates the whole product in ONE transaction: product, attributes, variants, images.
-     * If anything is invalid nothing is saved.
-     */
     public function create(array $data): Product
     {
         return DB::transaction(function () use ($data) {
@@ -62,7 +62,7 @@ class ProductService
                 $this->fail('category_id', 'The selected category is inactive.');
             }
 
-            $brand = $this->resolveBrand($data['brand_id'] ?? null, $data['brand_name'] ?? null);
+            $brand = $this->resolveBrand($data['brand_id'] ?? null, $data['brand_name'] ?? null, $category);
 
             $product = Product::create([
                 'category_id' => $category->id,
@@ -74,21 +74,20 @@ class ProductService
             ]);
 
             $this->attachAttributes($product, $category, $data['attributes'] ?? []);
-            $this->variants->add($product, $data['variants'] ?? []);   // after attributes, before images
+            $this->syncSpecs($product, $category, $data['specs'] ?? []);
+            $this->variants->add($product, $data['variants'] ?? []);
             $this->images->add($product, $data['images'] ?? []);
 
             return $this->find($product->id);
         });
     }
 
-    /** Basic info only. Variants, images and category are changed through their own methods. */
     public function update(Product $product, array $data): Product
     {
         if (array_key_exists('brand_id', $data) || array_key_exists('brand_name', $data)) {
-            $product->brand_id = $this->resolveBrand($data['brand_id'] ?? null, $data['brand_name'] ?? null)?->id;
+            $product->brand_id = $this->resolveBrand($data['brand_id'] ?? null, $data['brand_name'] ?? null, $product->category)?->id;
         }
 
-        // The slug is NOT regenerated on rename, so product URLs keep working.
         if (isset($data['name'])) {
             $product->name = $data['name'];
         }
@@ -108,7 +107,6 @@ class ProductService
         DB::transaction(function () use ($product) {
             $product->save();
 
-            // The name is shown on the inventory dashboard: tell Inventory (saved with the change, sent later).
             if ($product->wasChanged('name')) {
                 CatalogEvents::productUpserted($product);
             }
@@ -120,24 +118,21 @@ class ProductService
     public function delete(Product $product): void
     {
         DB::transaction(function () use ($product) {
-            CatalogEvents::productDeleted($product);   // Inventory stops suggesting purchases for these variants
-            $product->delete();   // soft delete
+            CatalogEvents::productDeleted($product);
+            $product->delete();
         });
     }
 
-    /**
-     * Existing brand by id, or a typed name:
-     * the name is matched by slug so "apple" / "Apple" reuse the same row, otherwise a new brand is saved.
-     */
-    private function resolveBrand(?int $id, ?string $name): ?Brand
+    private function resolveBrand(?int $id, ?string $name, Category $category): ?Brand
     {
         if ($id) {
             $brand = Brand::find($id) ?? $this->fail('brand_id', 'Brand not found.');
+            $field = 'brand_id';
         } else {
             $name = trim((string) $name);
 
             if ($name === '') {
-                return null;   // brand is optional
+                return null;
             }
 
             $slug = Str::slug($name);
@@ -147,16 +142,18 @@ class ProductService
             }
 
             $brand = Brand::firstOrCreate(['slug' => $slug], ['name' => $name, 'is_active' => true]);
+            $field = 'brand_name';
         }
 
         if (! $brand->is_active) {
-            $this->fail('brand_id', 'The selected brand is inactive.');
+            $this->fail($field, "Brand [{$brand->name}] is inactive. Re-activate it first.");
         }
+
+        $brand->categories()->syncWithoutDetaching([$category->id]);
 
         return $brand;
     }
 
-    /** Checks every chosen attribute/value against the category and stores them on the product. */
     private function attachAttributes(Product $product, Category $category, array $definitions): void
     {
         $allowed = $category->attributes()->get()->keyBy('id');
@@ -181,12 +178,73 @@ class ProductService
                 $this->fail("attributes.$i.value_ids", 'Select valid values for this attribute.');
             }
 
-            $sync[$attribute->id] = ['sort_order' => $attribute->pivot->sort_order];
+            $sync[$attribute->id] = ['sort_order' => $attribute->pivot->sort_order, 'is_variant' => true];
             $valueIds = array_merge($valueIds, $ids);
         }
 
         $product->attributes()->sync($sync);
         $product->attributeValues()->sync($valueIds);
+    }
+
+    public function setSpecs(Product $product, array $definitions): Product
+    {
+        DB::transaction(fn () => $this->syncSpecs($product, $product->category, $definitions));
+
+        return $this->find($product->id);
+    }
+
+    private function syncSpecs(Product $product, Category $category, array $definitions): void
+    {
+        $allowed = $category->attributes()->wherePivot('is_variant', false)->get()->keyBy('id');
+        $attach = [];
+        $valueIds = [];
+
+        foreach (array_values($definitions) as $i => $def) {
+            $attribute = $allowed->get((int) ($def['attribute_id'] ?? 0));
+
+            if (! $attribute) {
+                $this->fail("specs.$i.attribute_id", 'Not a fixed (non-variant) attribute of this category.');
+            }
+
+            if (isset($attach[$attribute->id])) {
+                $this->fail("specs.$i.attribute_id", 'Attribute listed twice.');
+            }
+
+            $ids = array_map('intval', $def['value_ids'] ?? []);
+
+            foreach ($def['values'] ?? [] as $text) {
+                if (trim((string) $text) !== '') {
+                    $ids[] = $this->attributes->addValue($attribute, (string) $text)->id;
+                }
+            }
+
+            $ids = array_values(array_unique($ids));
+            $valid = AttributeValue::where('attribute_id', $attribute->id)->whereIn('id', $ids)->count();
+
+            if ($ids === [] || $valid !== count($ids)) {
+                $this->fail("specs.$i.value_ids", 'Pick or type at least one valid value for this attribute.');
+            }
+
+            $attach[$attribute->id] = ['sort_order' => $attribute->pivot->sort_order, 'is_variant' => false];
+            $valueIds = array_merge($valueIds, $ids);
+        }
+
+        $old = DB::table('product_attributes')->where('product_id', $product->id)->where('is_variant', false);
+        $oldAttributeIds = (clone $old)->pluck('attribute_id');
+
+        if ($oldAttributeIds->isNotEmpty()) {
+            DB::table('product_attribute_assignments')
+                ->where('product_id', $product->id)
+                ->whereIn('attribute_value_id', AttributeValue::whereIn('attribute_id', $oldAttributeIds)->select('id'))
+                ->delete();
+            $old->delete();
+        }
+
+        foreach ($attach as $attributeId => $pivot) {
+            $product->attributes()->attach($attributeId, $pivot);
+        }
+
+        $product->attributeValues()->syncWithoutDetaching($valueIds);
     }
 
     private function uniqueSlug(string $name): string

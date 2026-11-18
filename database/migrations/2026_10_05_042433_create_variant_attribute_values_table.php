@@ -14,8 +14,8 @@ return new class extends Migration
             $t->foreignId('attribute_id')->constrained()->restrictOnDelete();
             $t->foreignId('attribute_value_id')->constrained()->restrictOnDelete();
 
-            $t->unique(['variant_id', 'attribute_id']);   // one value per attribute per variant
-            $t->index(['attribute_value_id', 'variant_id']);   // used by storefront filters
+            $t->unique(['variant_id', 'attribute_id']);
+            $t->index(['attribute_value_id', 'variant_id']);
         });
     }
 

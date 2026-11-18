@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('brands', function (Blueprint $t) {
             $t->id();
             $t->string('name');
-            $t->string('slug')->unique();   // 'Apple' and 'apple' share one slug, so no duplicate brands
+            $t->string('slug')->unique();
             $t->boolean('is_active')->default(true);
             $t->timestamps();
         });

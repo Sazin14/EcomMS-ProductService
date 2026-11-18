@@ -14,12 +14,16 @@ class SetupRabbitMq extends Command
 
     public function handle(RabbitMqConnection $mq): int
     {
-        $channel = $mq->channel();   // declares the exchanges ecom.events and ecom.retry
+        $channel = $mq->channel();   // declares the exchanges, the consumer queues of config('rabbitmq.queues') and the audit queue
 
         $this->info('Exchanges ready: '.config('rabbitmq.exchange').', '.config('rabbitmq.retry_exchange'));
 
-        // ProductService only publishes, so it owns no queues. The services that consume
-        // (InventoryService) declare their own queues.
+        foreach (array_keys((array) config('rabbitmq.queues')) as $queue) {
+            $this->info("Queues ready: {$queue}, {$queue}.retry, {$queue}.dlq (created here too, so events are never dropped before the consumer is deployed)");
+        }
+
+        $this->info('Audit queue ready: '.config('rabbitmq.audit_queue'));
+
         if ($this->option('debug')) {
             $channel->queue_declare('debug.catalog', false, true, false, false, false, new AMQPTable(['x-max-length' => 1000]));
             $channel->queue_bind('debug.catalog', config('rabbitmq.exchange'), 'catalog.#');

@@ -20,7 +20,12 @@ class CatalogEvents
         }
     }
 
-    public static function variantUpserted(ProductVariant $variant, ?Product $product = null): void
+    /**
+     * $initialStock: the stock typed in the "create product" form. It is sent ONCE, with the event of a brand-new
+     * variant, and InventoryService turns it into an opening-stock receipt in its default warehouse.
+     * After that Inventory owns stock: changes go through InventoryService (receive / adjust / transfer).
+     */
+    public static function variantUpserted(ProductVariant $variant, ?Product $product = null, ?int $initialStock = null): void
     {
         $product ??= Product::withTrashed()->findOrFail($variant->product_id);
         $variant->loadMissing('attributeValues');
@@ -32,6 +37,7 @@ class CatalogEvents
             'product_name' => $product->name,
             'variant_label' => $variant->attributeValues->sortBy('attribute_id')->pluck('value')->implode(' / ') ?: null,
             'allow_preorder' => (bool) $variant->allow_preorder,
+            ...($initialStock !== null && $initialStock > 0 ? ['initial_stock' => $initialStock] : []),
         ]);
     }
 

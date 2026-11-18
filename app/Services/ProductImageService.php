@@ -11,10 +11,7 @@ class ProductImageService
 {
     use FailsValidation;
 
-    /**
-     * @param  array  $images  [['url' => '...', 'attribute_value_id' => 10|null, 'is_primary' => true, 'sort_order' => 0], ...]
-     *                         attribute_value_id = null means a general image shown for every variant.
-     */
+    /** @param array $images */
     public function add(Product $product, array $images): void
     {
         if ($images === []) {
@@ -34,7 +31,6 @@ class ProductImageService
         $now = now();
         $rows = [];
 
-        // Each scope ("general", "Space Grey", "Ocean Blue"...) keeps exactly one primary image.
         $groups = collect($images)->groupBy(fn ($img) => $img['attribute_value_id'] ?? 'general');
 
         foreach ($groups as $scope => $items) {
@@ -70,7 +66,6 @@ class ProductImageService
             $image->delete();
 
             if ($image->is_primary) {
-                // Promote the next image of the same scope.
                 ProductImage::where('product_id', $image->product_id)
                     ->when(
                         $image->attribute_value_id === null,

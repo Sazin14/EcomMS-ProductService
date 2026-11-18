@@ -4,22 +4,24 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Attribute;
-use App\Models\Brand;
 use App\Services\AttributeService;
+use App\Services\BrandService;
 use Illuminate\Http\Request;
 
-/** Data the admin "create product" form needs before submitting. */
 class ProductSetupController extends Controller
 {
-    public function __construct(private AttributeService $attributes) {}
+    public function __construct(
+        private AttributeService $attributes,
+        private BrandService $brands,
+    ) {}
 
-    /** Attributes (with predefined values) of the chosen category. */
-    public function categoryAttributes(int $category)
+    public function categoryAttributes(Request $request, int $category)
     {
-        return $this->attributes->forCategory($category);
+        $variant = $request->has('variant') ? $request->boolean('variant') : null;
+
+        return $this->attributes->forCategory($category, $variant);
     }
 
-    /** "+ add value" button: saves a new value and returns it (or the existing one). */
     public function addValue(Request $request, Attribute $attribute)
     {
         $data = $request->validate(['value' => ['required', 'string', 'max:100']]);
@@ -27,9 +29,13 @@ class ProductSetupController extends Controller
         return response()->json($this->attributes->addValue($attribute, $data['value']), 201);
     }
 
-    /** Brand dropdown. Admin may also type a new name in brand_name when saving the product. */
-    public function brands()
+    public function brands(Request $request)
     {
-        return Brand::where('is_active', true)->orderBy('name')->get(['id', 'name']);
+        $data = $request->validate([
+            'category_id' => ['nullable', 'integer', 'exists:categories,id'],
+            'all' => ['nullable', 'boolean'],
+        ]);
+
+        return $this->brands->list($data['category_id'] ?? null, (bool) ($data['all'] ?? false));
     }
 }
