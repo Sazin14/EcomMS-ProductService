@@ -51,6 +51,10 @@ class CatalogDemoSeeder extends Seeder
         $this->attribute('Size', ['S', 'M', 'L', 'XL'], [$tshirts]);
         $this->attribute('Color', ['Space Grey', 'Ocean Blue', 'Midnight Green', 'Black', 'White'], [$phones, $tshirts]);
 
+        // Fixed specs (not variable): one value per product, still filterable on the storefront.
+        $this->attribute('Network', ['4G', '5G'], [$phones], isVariant: false);
+        $this->attribute('Material', ['Cotton', 'Polyester'], [$tshirts], isVariant: false);
+
         $this->product([
             'name' => 'Nova X1',
             'code' => 'NX1',
@@ -62,6 +66,7 @@ class CatalogDemoSeeder extends Seeder
                 'Storage' => ['128GB', '512GB'],
                 'Color' => ['Space Grey', 'Ocean Blue'],
             ],
+            'specs' => ['Network' => ['5G']],
             'base_price' => 600,
             'extras' => ['16GB' => 100, '512GB' => 120],
             // 16GB + 128GB is not sold: tests that admins can drop combinations
@@ -81,6 +86,7 @@ class CatalogDemoSeeder extends Seeder
                 'Storage' => ['256GB', '512GB', '1TB'],
                 'Color' => ['Space Grey', 'Midnight Green'],
             ],
+            'specs' => ['Network' => ['5G']],
             'base_price' => 850,
             'extras' => ['16GB' => 150, '512GB' => 100, '1TB' => 250],
             'general_images' => 2,
@@ -97,6 +103,7 @@ class CatalogDemoSeeder extends Seeder
                 'Size' => ['S', 'M', 'L', 'XL'],
                 'Color' => ['Black', 'White'],
             ],
+            'specs' => ['Material' => ['Cotton']],
             'base_price' => 20,
             'extras' => ['XL' => 2],
             'general_images' => 1,
@@ -114,7 +121,7 @@ class CatalogDemoSeeder extends Seeder
         );
     }
 
-    private function attribute(string $name, array $values, array $categories): void
+    private function attribute(string $name, array $values, array $categories, bool $isVariant = true): void
     {
         $attribute = Attribute::firstOrCreate(['slug' => Str::slug($name)], ['name' => $name]);
         $this->attributeIds[$name] = $attribute->id;
@@ -130,7 +137,7 @@ class CatalogDemoSeeder extends Seeder
 
         foreach ($categories as $category) {
             $category->attributes()->syncWithoutDetaching([
-                $attribute->id => ['is_variant' => true, 'sort_order' => $this->order],
+                $attribute->id => ['is_variant' => $isVariant, 'sort_order' => $this->order],
             ]);
         }
 
@@ -147,6 +154,15 @@ class CatalogDemoSeeder extends Seeder
 
         foreach ($p['options'] as $attribute => $valueNames) {
             $definitions[] = [
+                'attribute_id' => $this->attributeIds[$attribute],
+                'value_ids' => array_map(fn ($v) => $this->values[$attribute][$v], $valueNames),
+            ];
+        }
+
+        $specs = [];
+
+        foreach ($p['specs'] ?? [] as $attribute => $valueNames) {
+            $specs[] = [
                 'attribute_id' => $this->attributeIds[$attribute],
                 'value_ids' => array_map(fn ($v) => $this->values[$attribute][$v], $valueNames),
             ];
@@ -207,6 +223,7 @@ class CatalogDemoSeeder extends Seeder
             'description' => $p['description'],
             'status' => 'active',
             'attributes' => $definitions,
+            'specs' => $specs,
             'variants' => $variants,
             'images' => $images,
         ]);

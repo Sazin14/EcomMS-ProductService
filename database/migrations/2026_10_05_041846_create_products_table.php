@@ -15,7 +15,7 @@ return new class extends Migration
             $t->string('name');
             $t->string('slug')->unique();
             $t->text('description')->nullable();
-            $t->string('status', 20)->default('draft');   // draft | active | inactive
+            $t->string('status', 20)->default('draft');
             $t->timestamps();
             $t->softDeletes();
 

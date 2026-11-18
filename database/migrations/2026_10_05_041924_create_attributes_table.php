@@ -12,7 +12,7 @@ return new class extends Migration
             $t->id();
             $t->string('name');
             $t->string('slug')->unique();
-            $t->string('type', 20)->default('select');   // select | color | number ...
+            $t->string('type', 20)->default('select');
             $t->timestamps();
         });
     }

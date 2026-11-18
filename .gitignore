@@ -25,3 +25,7 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Local scratch files (website fetch output, not used by the app)
+/dgda_collection.json
+/dgda_headers.txt

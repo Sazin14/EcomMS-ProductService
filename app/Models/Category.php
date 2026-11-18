@@ -28,7 +28,6 @@ class Category extends Model
         return $this->hasMany(Product::class);
     }
 
-    /** Attributes admins can use in this category (pivot: is_variant, sort_order). */
     public function attributes(): BelongsToMany
     {
         return $this->belongsToMany(Attribute::class, 'category_attributes')
@@ -36,7 +35,26 @@ class Category extends Model
             ->orderBy('category_attributes.sort_order');
     }
 
-    /** This category's id plus all active child/grandchild ids (for "show everything under Electronics"). */
+    public function brands(): BelongsToMany
+    {
+        return $this->belongsToMany(Brand::class, 'brand_category');
+    }
+
+    public static function subtreeIds(int $rootId, bool $onlyActive = false): array
+    {
+        $ids = [$rootId];
+        $level = [$rootId];
+
+        while ($level) {
+            $level = static::whereIn('parent_id', $level)
+                ->when($onlyActive, fn ($q) => $q->where('is_active', true))
+                ->pluck('id')->all();
+            $ids = array_merge($ids, $level);
+        }
+
+        return $ids;
+    }
+
     public function descendantIds(): array
     {
         $ids = [$this->id];

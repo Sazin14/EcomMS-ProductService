@@ -5,33 +5,27 @@ namespace App\Services;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Product;
+use App\Support\SqlCompat;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
-/** Storefront side: browse a category, filter by brand / attribute values / price. */
 class CatalogService
 {
-    /**
-     * Filters:
-     *   category_id, brand_ids[], min_price, max_price, search, sort (newest|price_asc|price_desc), per_page
-     *   attributes => [attributeId => [valueId, ...]]   e.g. attributes[1][]=2&attributes[1][]=3&attributes[3][]=10
-     *
-     * Rule: OR inside one attribute (8GB or 16GB), AND between attributes (and price) -
-     * and all of them must be true for the SAME variant.
-     */
     public function products(array $f): LengthAwarePaginator
     {
         $categoryIds = isset($f['category_id'])
-            ? Category::where('is_active', true)->findOrFail($f['category_id'])->descendantIds()
+            ? Category::subtreeIds(Category::where('is_active', true)->findOrFail($f['category_id'])->id, onlyActive: true)
             : null;
+
+        [$variantFilters, $specFilters] = $this->splitAttributeFilters($f['attributes'] ?? []);
 
         $activeVariant = fn ($q) => $q->where('status', 'active');
 
         $query = Product::query()->active()
             ->when($categoryIds, fn ($q) => $q->whereIn('category_id', $categoryIds))
             ->when($f['brand_ids'] ?? null, fn ($q, $ids) => $q->whereIn('brand_id', (array) $ids))
-            ->when($f['search'] ?? null, fn ($q, $s) => $q->where('name', 'ilike', '%'.trim($s).'%'))
-            ->whereHas('variants', function ($variant) use ($f) {
+            ->when($f['search'] ?? null, fn ($q, $s) => $q->where('name', SqlCompat::like(), '%'.trim($s).'%'))
+            ->whereHas('variants', function ($variant) use ($f, $variantFilters) {
                 $variant->where('status', 'active');
 
                 if (isset($f['min_price'])) {
@@ -42,15 +36,21 @@ class CatalogService
                     $variant->where('selling_price', '<=', $f['max_price']);
                 }
 
-                foreach ($f['attributes'] ?? [] as $attributeId => $valueIds) {
+                foreach ($variantFilters as $attributeId => $valueIds) {
                     $variant->whereHas('attributeValues', fn ($q) => $q
-                        ->where('attribute_values.attribute_id', (int) $attributeId)
-                        ->whereIn('attribute_values.id', array_map('intval', (array) $valueIds)));
+                        ->where('attribute_values.attribute_id', $attributeId)
+                        ->whereIn('attribute_values.id', $valueIds));
                 }
             })
             ->with(['brand:id,name,slug', 'thumbnail'])
             ->withMin(['variants as min_price' => $activeVariant], 'selling_price')
             ->withMax(['variants as max_price' => $activeVariant], 'selling_price');
+
+        foreach ($specFilters as $attributeId => $valueIds) {
+            $query->whereHas('attributeValues', fn ($q) => $q
+                ->where('attribute_values.attribute_id', $attributeId)
+                ->whereIn('attribute_values.id', $valueIds));
+        }
 
         match ($f['sort'] ?? 'newest') {
             'price_asc' => $query->orderBy('min_price'),
@@ -61,12 +61,13 @@ class CatalogService
         return $query->paginate(min((int) ($f['per_page'] ?? 20), 100));
     }
 
-    /** Sidebar data for a category: brands under it, attribute values that really exist, price range. */
     public function facets(int $categoryId): array
     {
-        $ids = Category::where('is_active', true)->findOrFail($categoryId)->descendantIds();
+        $ids = Category::subtreeIds(Category::where('is_active', true)->findOrFail($categoryId)->id, onlyActive: true);
 
-        $inCategory = fn ($q) => $q->active()->whereIn('category_id', $ids);
+        $inCategory = fn ($q) => $q->active()
+            ->whereIn('category_id', $ids)
+            ->whereHas('variants', fn ($v) => $v->where('status', 'active'));
 
         $brands = Brand::query()
             ->where('is_active', true)
@@ -75,28 +76,57 @@ class CatalogService
             ->orderBy('name')
             ->get();
 
-        $rows = $this->variantBase($ids)
+        $variantRows = $this->variantBase($ids)
             ->join('variant_attribute_values as vav', 'vav.variant_id', '=', 'v.id')
             ->join('attribute_values as av', 'av.id', '=', 'vav.attribute_value_id')
             ->join('attributes as a', 'a.id', '=', 'av.attribute_id')
             ->groupBy('a.id', 'a.name', 'a.slug', 'av.id', 'av.value', 'av.slug', 'av.sort_order')
             ->selectRaw('a.id as attribute_id, a.name as attribute_name, a.slug as attribute_slug,
-                         av.id as value_id, av.value, av.slug as value_slug,
+                         av.id as value_id, av.value, av.slug as value_slug, av.sort_order,
                          count(distinct p.id) as products_count')
-            ->orderBy('a.name')->orderBy('av.sort_order')->orderBy('av.value')
-            ->get();
+            ->get()
+            ->map(function ($row) {
+                $row->is_variant = true;
 
-        $attributes = $rows->groupBy('attribute_id')->map(fn ($group) => [
-            'id' => $group->first()->attribute_id,
-            'name' => $group->first()->attribute_name,
-            'slug' => $group->first()->attribute_slug,
-            'values' => $group->map(fn ($r) => [
-                'id' => $r->value_id,
-                'value' => $r->value,
-                'slug' => $r->value_slug,
-                'products_count' => $r->products_count,
-            ])->values(),
-        ])->values();
+                return $row;
+            });
+
+        $specRows = DB::table('products as p')
+            ->join('product_attributes as pa', fn ($j) => $j->on('pa.product_id', '=', 'p.id')->where('pa.is_variant', false))
+            ->join('product_attribute_assignments as paa', 'paa.product_id', '=', 'p.id')
+            ->join('attribute_values as av', fn ($j) => $j->on('av.id', '=', 'paa.attribute_value_id')->on('av.attribute_id', '=', 'pa.attribute_id'))
+            ->join('attributes as a', 'a.id', '=', 'av.attribute_id')
+            ->whereIn('p.category_id', $ids)
+            ->where('p.status', 'active')
+            ->whereNull('p.deleted_at')
+            ->whereExists(fn ($q) => $q->selectRaw('1')->from('product_variants as v')
+                ->whereColumn('v.product_id', 'p.id')->where('v.status', 'active'))
+            ->groupBy('a.id', 'a.name', 'a.slug', 'av.id', 'av.value', 'av.slug', 'av.sort_order')
+            ->selectRaw('a.id as attribute_id, a.name as attribute_name, a.slug as attribute_slug,
+                         av.id as value_id, av.value, av.slug as value_slug, av.sort_order,
+                         count(distinct p.id) as products_count')
+            ->get()
+            ->map(function ($row) {
+                $row->is_variant = false;
+
+                return $row;
+            });
+
+        $attributes = $variantRows->concat($specRows)
+            ->sortBy([['attribute_name', 'asc'], ['sort_order', 'asc'], ['value', 'asc']])
+            ->groupBy('attribute_id')
+            ->map(fn ($group) => [
+                'id' => $group->first()->attribute_id,
+                'name' => $group->first()->attribute_name,
+                'slug' => $group->first()->attribute_slug,
+                'is_variant' => $group->first()->is_variant,
+                'values' => $group->map(fn ($r) => [
+                    'id' => $r->value_id,
+                    'value' => $r->value,
+                    'slug' => $r->value_slug,
+                    'products_count' => $r->products_count,
+                ])->values(),
+            ])->values();
 
         $price = $this->variantBase($ids)
             ->selectRaw('min(v.selling_price) as min, max(v.selling_price) as max')
@@ -109,10 +139,9 @@ class CatalogService
         ];
     }
 
-    /** Product page: active variants with their values, plus images. */
     public function show(string $slug): Product
     {
-        return Product::active()
+        $product = Product::active()
             ->where('slug', $slug)
             ->with([
                 'category:id,name,slug',
@@ -124,9 +153,43 @@ class CatalogService
                 'images',
             ])
             ->firstOrFail();
+
+        $product->variants->each->makeHidden(['purchase_price', 'stock']);
+        $product->setAttribute('specs', $product->specGroups());
+
+        return $product;
     }
 
-    /** Active variants of active products in the given categories. */
+    /** @return array{0: array<int, int[]>, 1: array<int, int[]>} */
+    private function splitAttributeFilters(array $attributes): array
+    {
+        $clean = [];
+
+        foreach ($attributes as $attributeId => $valueIds) {
+            $valueIds = array_values(array_filter(array_map('intval', (array) $valueIds)));
+
+            if ($valueIds !== []) {
+                $clean[(int) $attributeId] = $valueIds;
+            }
+        }
+
+        if ($clean === []) {
+            return [[], []];
+        }
+
+        $specIds = DB::table('category_attributes')
+            ->where('is_variant', false)
+            ->whereIn('attribute_id', array_keys($clean))
+            ->pluck('attribute_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        return [
+            array_diff_key($clean, array_flip($specIds)),
+            array_intersect_key($clean, array_flip($specIds)),
+        ];
+    }
+
     private function variantBase(array $categoryIds)
     {
         return DB::table('product_variants as v')

@@ -5,15 +5,24 @@ namespace App\Http\Controllers\Storefront;
 use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Services\CatalogService;
+use App\Services\CategoryService;
 use Illuminate\Http\Request;
 
 class CatalogController extends Controller
 {
-    public function __construct(private CatalogService $catalog) {}
+    public function __construct(
+        private CatalogService $catalog,
+        private CategoryService $categories,
+    ) {}
 
     public function categories()
     {
         return Category::where('is_active', true)->orderBy('name')->get(['id', 'parent_id', 'name', 'slug']);
+    }
+
+    public function categoryTree()
+    {
+        return ['data' => $this->categories->tree(onlyActive: true)];
     }
 
     public function products(Request $request)
@@ -35,7 +44,6 @@ class CatalogController extends Controller
         return $this->catalog->products($filters);
     }
 
-    /** Sidebar: brands, attribute values and price range for a category. */
     public function filters(Request $request)
     {
         $data = $request->validate(['category_id' => ['required', 'integer']]);

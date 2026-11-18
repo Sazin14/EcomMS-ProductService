@@ -6,10 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Models\ProductVariant;
 use Illuminate\Http\Request;
 
-/**
- * OrderService asks "what are these variants called and what do they cost right now?".
- * The cart and the checkout trust this answer, never a price sent by the browser.
- */
 class VariantLookupController extends Controller
 {
     public function lookup(Request $request)
@@ -25,7 +21,7 @@ class VariantLookupController extends Controller
             ->get();
 
         $rows = $variants->map(function (ProductVariant $variant) {
-            $product = $variant->product;   // null when the product was deleted (soft delete)
+            $product = $variant->product;
             $valueIds = $variant->attributeValues->pluck('id')->all();
 
             return [
@@ -43,7 +39,6 @@ class VariantLookupController extends Controller
         return response()->json(['data' => $rows]);
     }
 
-    /** The picture of this variant's colour if there is one, otherwise the product's main picture. */
     private function imageFor($product, array $valueIds): ?string
     {
         if (! $product) {
