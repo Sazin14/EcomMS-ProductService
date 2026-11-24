@@ -5,6 +5,7 @@ use App\Http\Controllers\Admin\BrandController;
 use App\Http\Controllers\Admin\CategoryController;
 use App\Http\Controllers\Admin\ProductController;
 use App\Http\Controllers\Admin\ProductSetupController;
+use App\Http\Controllers\Admin\ReviewController;
 use App\Http\Controllers\Internal\VariantLookupController;
 use App\Http\Controllers\Storefront\CatalogController;
 use App\Http\Middleware\VerifyServiceKey;
@@ -55,6 +56,10 @@ Route::middleware(['auth.jwt', 'authz'])->prefix('admin')->group(function () {
 
     Route::post('products/{product}/images', [ProductController::class, 'addImages'])->middleware('permission:product.update');
     Route::delete('images/{image}', [ProductController::class, 'destroyImage'])->middleware('permission:product.update');
+
+    Route::get('reviews', [ReviewController::class, 'index'])->middleware('permission:product.view');
+    Route::patch('reviews/{review}/status', [ReviewController::class, 'moderate'])->middleware('permission:product.update');
+    Route::delete('reviews/{review}', [ReviewController::class, 'destroy'])->middleware('permission:product.delete');
 });
 
 Route::post('internal/variants/lookup', [VariantLookupController::class, 'lookup'])
