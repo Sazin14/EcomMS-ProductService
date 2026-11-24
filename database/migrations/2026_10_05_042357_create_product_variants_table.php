@@ -12,14 +12,14 @@ return new class extends Migration
             $t->id();
             $t->foreignId('product_id')->constrained()->cascadeOnDelete();
             $t->string('sku', 100)->unique();
-            $t->string('combination_hash', 32);   // md5 of the sorted value ids
+            $t->string('combination_hash', 32);
             $t->decimal('purchase_price', 12, 2);
             $t->decimal('selling_price', 12, 2);
             $t->unsignedInteger('stock')->default(0);
-            $t->string('status', 20)->default('active');   // active | inactive
+            $t->string('status', 20)->default('active');
             $t->timestamps();
 
-            $t->unique(['product_id', 'combination_hash']);   // DB blocks duplicate combinations
+            $t->unique(['product_id', 'combination_hash']);
             $t->index('selling_price');
         });
     }

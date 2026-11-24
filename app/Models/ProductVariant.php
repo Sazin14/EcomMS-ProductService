@@ -25,7 +25,6 @@ class ProductVariant extends Model
         return $this->belongsTo(Product::class);
     }
 
-    /** The values that define this variant (8GB, 128GB, Space Grey). */
     public function attributeValues(): BelongsToMany
     {
         return $this->belongsToMany(AttributeValue::class, 'variant_attribute_values', 'variant_id', 'attribute_value_id');

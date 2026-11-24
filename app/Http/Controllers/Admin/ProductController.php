@@ -11,6 +11,7 @@ use App\Services\ProductImageService;
 use App\Services\ProductService;
 use App\Services\VariantService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ProductController extends Controller
 {
@@ -48,6 +49,16 @@ class ProductController extends Controller
         return $this->products->update($product, $data);
     }
 
+    public function setSpecs(Request $request, Product $product)
+    {
+        $data = $request->validate([
+            'specs' => ['present', 'array'],
+            ...StoreProductRequest::specRules(),
+        ]);
+
+        return $this->products->setSpecs($product, $data['specs']);
+    }
+
     public function destroy(Product $product)
     {
         $this->products->delete($product);
@@ -55,7 +66,6 @@ class ProductController extends Controller
         return response()->noContent();
     }
 
-    /** Builds the combination table rows for the UI. Saves nothing. */
     public function combinations(Request $request)
     {
         $data = $request->validate([
@@ -75,7 +85,7 @@ class ProductController extends Controller
             ...StoreProductRequest::variantRules(),
         ]);
 
-        $this->variants->add($product, $data['variants']);
+        DB::transaction(fn () => $this->variants->add($product, $data['variants']));
 
         return response()->json($this->products->find($product->id), 201);
     }
@@ -86,9 +96,11 @@ class ProductController extends Controller
             'sku' => ['sometimes', 'string', 'max:100'],
             'purchase_price' => ['sometimes', 'numeric', 'min:0'],
             'selling_price' => ['sometimes', 'numeric', 'min:0'],
-            'stock' => ['sometimes', 'integer', 'min:0'],
+            'stock' => ['prohibited'],
             'status' => ['sometimes', 'in:active,inactive'],
             'allow_preorder' => ['sometimes', 'boolean'],
+        ], [
+            'stock.prohibited' => 'Stock is managed by InventoryService (POST /api/admin/stock/receive, /adjust or /transfer there).',
         ]);
 
         return $this->variants->update($variant, $data);
@@ -108,7 +120,7 @@ class ProductController extends Controller
             ...StoreProductRequest::imageRules(),
         ]);
 
-        $this->images->add($product, $data['images']);
+        DB::transaction(fn () => $this->images->add($product, $data['images']));
 
         return response()->json($this->products->find($product->id), 201);
     }

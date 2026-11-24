@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('product_images', function (Blueprint $t) {
             $t->id();
             $t->foreignId('product_id')->constrained()->cascadeOnDelete();
-            $t->foreignId('attribute_value_id')->nullable()->constrained()->cascadeOnDelete();   // null = general image
+            $t->foreignId('attribute_value_id')->nullable()->constrained()->cascadeOnDelete();
             $t->string('url', 2048);
             $t->unsignedSmallInteger('sort_order')->default(0);
             $t->boolean('is_primary')->default(false);

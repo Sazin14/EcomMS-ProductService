@@ -32,15 +32,44 @@ class Product extends Model
         return $this->belongsTo(Brand::class);
     }
 
-    /** Attributes this product uses (RAM, Storage, Color). */
     public function attributes(): BelongsToMany
     {
         return $this->belongsToMany(Attribute::class, 'product_attributes')
-            ->withPivot('sort_order')
+            ->withPivot('sort_order', 'is_variant')
             ->orderBy('product_attributes.sort_order');
     }
 
-    /** Values the admin selected for this product (8GB, 16GB, Space Grey...). */
+    public function variantAttributes(): BelongsToMany
+    {
+        return $this->attributes()->wherePivot('is_variant', true);
+    }
+
+    public function specAttributes(): BelongsToMany
+    {
+        return $this->attributes()->wherePivot('is_variant', false);
+    }
+
+    public function specGroups(): array
+    {
+        $this->loadMissing('attributes', 'attributeValues');
+
+        return $this->getRelation('attributes')
+            ->filter(fn ($a) => ! (bool) $a->pivot->is_variant)
+            ->map(fn ($a) => [
+                'id' => $a->id,
+                'name' => $a->name,
+                'slug' => $a->slug,
+                'values' => $this->attributeValues
+                    ->where('attribute_id', $a->id)
+                    ->sortBy('sort_order')
+                    ->map(fn ($v) => ['id' => $v->id, 'value' => $v->value, 'slug' => $v->slug])
+                    ->values()
+                    ->all(),
+            ])
+            ->values()
+            ->all();
+    }
+
     public function attributeValues(): BelongsToMany
     {
         return $this->belongsToMany(AttributeValue::class, 'product_attribute_assignments');
@@ -56,7 +85,6 @@ class Product extends Model
         return $this->hasMany(ProductImage::class)->orderBy('sort_order')->orderBy('id');
     }
 
-    /** Card image for listings: a primary image, general ones first. */
     public function thumbnail(): HasOne
     {
         return $this->hasOne(ProductImage::class)
@@ -65,7 +93,6 @@ class Product extends Model
             ->orderBy('sort_order');
     }
 
-    /** Images to show for one variant: its own attribute-value images plus general ones. */
     public function imagesFor(ProductVariant $variant): Collection
     {
         $valueIds = $variant->attributeValues->pluck('id');
